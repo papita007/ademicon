@@ -509,25 +509,9 @@ body {
     <p class="hiring-title">Vagas para Consultores!</p>
     <p class="hiring-desc">Faça parte do time Ademicon. Se você tem perfil comercial e quer crescer com a gente, envie seu currículo abaixo.</p>
 
-    <div class="file-upload-zone" id="upload-zone">
-      <input type="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" id="curriculo-input" onchange="handleFile(this)" />
-      <i class="ti ti-cloud-upload up-icon"></i>
-      <p class="up-label">Clique para anexar seu currículo</p>
-      <p class="up-hint">PDF, DOC, DOCX · até 45 MB</p>
-    </div>
-
-    <div class="file-tag" id="file-tag">
-      <i class="ti ti-file-text"></i>
-      <span id="file-name-text">arquivo.pdf</span>
-    </div>
-
-    <div class="progress-bar-wrap" id="progress-wrap">
-      <div class="progress-bar-fill" id="progress-fill"></div>
-    </div>
-
-    <button class="curriculum-btn" id="btn-curriculo" onclick="submitCurriculo()">
+    <button class="curriculum-btn" onclick="window.open('https://docs.google.com/forms/d/e/1FAIpQLSd8ZTDzxiyvhV3Spu8I8dcoLV5nup7OyvpFimCLPgJiW986Pg/viewform', '_blank')">
       <i class="ti ti-send"></i>
-      Enviar currículo
+      Anexar e enviar currículo
     </button>
   </div>
 
@@ -549,7 +533,7 @@ body {
 // =============================================
 // ⚠️  COLE AQUI A URL DO SEU APPS SCRIPT ⚠️
 // =============================================
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyWKHWUxKAZBVt_LYbeQtiTdOrX9Rnwau3stSH_l93ouMXyfteAmF5UhjkOZnX9_fMX/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwwROaTQPkTYBWdZ3UUVM8DTfitnoBPy3RGkyzS8gv9a04IufWy0uTwHaVFiDbJIE7g/exec';
 // =============================================
 
 const selectedInterests = new Set();
@@ -589,17 +573,24 @@ function showToast(msg, type = 'success') {
 }
 
 // POST to Apps Script
-async function postToScript(data) {
-  const res = await fetch(APPS_SCRIPT_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain' },
-    body: JSON.stringify(data)
+function postToScript(data) {
+  return new Promise((resolve, reject) => {
+    const callbackName = 'cb_' + Date.now();
+    const url = APPS_SCRIPT_URL + '?callback=' + callbackName + '&data=' + encodeURIComponent(JSON.stringify(data));
+    window[callbackName] = function(response) {
+      delete window[callbackName];
+      document.body.removeChild(script);
+      resolve(response);
+    };
+    const script = document.createElement('script');
+    script.src = url;
+    script.onerror = () => { delete window[callbackName]; reject(new Error('Falha na conexão')); };
+    document.body.appendChild(script);
   });
-  return res.json();
 }
 
 // Submit sorteio form
-async function submitSorteio() {
+function submitSorteio() {
   const nome = document.getElementById('nome').value.trim();
   const celular = document.getElementById('celular').value.trim();
 
@@ -611,15 +602,13 @@ async function submitSorteio() {
   btn.disabled = true;
   btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Enviando...';
 
-  try {
-    const result = await postToScript({
-      type: 'sorteio',
-      nome,
-      celular,
-      interesses: [...selectedInterests],
-      outros: document.getElementById('outros-desc').value.trim()
-    });
-
+  postToScript({
+    type: 'sorteio',
+    nome,
+    celular,
+    interesses: [...selectedInterests],
+    outros: document.getElementById('outros-desc').value.trim()
+  }).then(result => {
     if (result.success) {
       showToast('Inscrição realizada! Boa sorte no sorteio 🎉');
       document.getElementById('nome').value = '';
@@ -631,16 +620,16 @@ async function submitSorteio() {
     } else {
       showToast('Erro ao enviar. Tente novamente.', 'error');
     }
-  } catch(e) {
-    showToast('Erro de conexão. Verifique a URL do script.', 'error');
-  } finally {
+  }).catch(() => {
+    showToast('Erro ao enviar. Tente novamente.', 'error');
+  }).finally(() => {
     btn.disabled = false;
     btn.innerHTML = '<i class="ti ti-send"></i> Participar do sorteio';
-  }
+  });
 }
 
-// Submit curriculum
-async function submitCurriculo() {
+// Submit curriculum — usa no-cors POST (arquivo grande não cabe em JSONP)
+function submitCurriculo() {
   if (!curricFile) { showToast('Anexe um currículo antes de enviar.', 'error'); return; }
 
   const btn = document.getElementById('btn-curriculo');
@@ -651,47 +640,44 @@ async function submitCurriculo() {
   const progressFill = document.getElementById('progress-fill');
   progressWrap.classList.add('show');
 
-  // Animate progress visually while reading file
   let prog = 0;
   const tick = setInterval(() => {
-    prog = Math.min(prog + 8, 85);
+    prog = Math.min(prog + 4, 90);
     progressFill.style.width = prog + '%';
-  }, 120);
+  }, 200);
 
-  try {
-    const base64 = await fileToBase64(curricFile);
-
-    const result = await postToScript({
-      type: 'curriculo',
-      nome: '(candidato)',
-      celular: '',
-      fileName: curricFile.name,
-      mimeType: curricFile.type || 'application/octet-stream',
-      fileData: base64
+  fileToBase64(curricFile).then(base64 => {
+    return fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({
+        type: 'curriculo',
+        nome: '(candidato)',
+        celular: '',
+        fileName: curricFile.name,
+        mimeType: curricFile.type || 'application/octet-stream',
+        fileData: base64
+      })
     });
-
+  }).then(() => {
     clearInterval(tick);
     progressFill.style.width = '100%';
-
-    if (result.success) {
-      showToast('Currículo enviado! Entraremos em contato 👏');
-      curricFile = null;
-      document.getElementById('curriculo-input').value = '';
-      document.getElementById('file-tag').classList.remove('show');
-    } else {
-      showToast('Erro ao enviar. Tente novamente.', 'error');
-    }
-  } catch(e) {
+    showToast('Currículo enviado! Entraremos em contato 👏');
+    curricFile = null;
+    document.getElementById('curriculo-input').value = '';
+    document.getElementById('file-tag').classList.remove('show');
+  }).catch(() => {
     clearInterval(tick);
-    showToast('Erro de conexão. Verifique a URL do script.', 'error');
-  } finally {
+    showToast('Erro ao enviar. Tente novamente.', 'error');
+  }).finally(() => {
     btn.disabled = false;
     btn.innerHTML = '<i class="ti ti-send"></i> Enviar currículo';
     setTimeout(() => {
       progressWrap.classList.remove('show');
       progressFill.style.width = '0%';
     }, 1200);
-  }
+  });
 }
 
 // Convert file to base64
